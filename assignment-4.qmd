@@ -1,0 +1,637 @@
+---
+title: "Assignment 4 - Visualization"
+author: "Felix Kube"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: show
+    df_print: paged
+    highlight: tango
+    number_sections: no
+    theme: cosmo
+    toc: no
+self-contained: true
+warning: false
+css: felix-touch.css
+---
+
+```{r}
+#| label: packages
+#| warning: false
+
+library(tidyverse)
+library(ggplot2)
+library(ggtext)
+library(plotly)
+library(grid)
+library(gridExtra)
+library(cowplot)
+
+```
+
+<br>
+
+------------------------------------------------------------------------
+
+### Task 1 - Principles of good data visualization
+
+Over at [Our World in Data](https://ourworldindata.org/grapher/child-mortality-vs-health-expenditure) you will find a chart illustrating child mortality vs. health expenditure, 2000 to 2019, across countries.
+
+Download the data and reproduce the plot as closely as possible using only the 2019 data (i.e. the bubble scatter plot that you see when you move the slider to the right) and log scales. Your plot does not have to be interactive and the colors don't have to exactly match those from the original plot as long as your plot remains well readable and transports the same information as the original plot.
+
+<br>
+
+My `plotly` does for some reason not work. Could you please check my code and tell me what is wrong? I spend hours debugging, but Sierra Leone is randomly big while China and India are small. `pop_norm` is created correctly.....
+
+```{r}
+#| label: read-prep-data-task1
+#| code-fold: true
+#| code-summary: "Open here for data preparation."
+
+OWID <- read_csv("data/child-mortality-vs-health-expenditure.csv")
+OWID_Var_Desc <- names(OWID)
+OWID_Var_Desc[4] <- "Child mortality (deaths per 100 live births)"
+
+
+Continent_Lookup_DF <- OWID %>%
+  filter(!is.na(Continent)) %>%
+  select(Code, Continent)
+
+format_population <- function(pop) {
+  if (is.na(pop))  {
+    return(NA)
+  } else if (pop >= 1e9) {
+    # For population in billions (>= 1 billion)
+    return(paste0(round(pop / 1e9, 2), " billion"))
+  } else if (pop >= 1e6) {
+    # For population in millions (>= 1 million but < 1 billion)
+    return(paste0(round(pop / 1e6, 2), " million"))
+  } else {
+    # If population is less than 1,000 (thousands)
+    return(as.character(pop))
+  }
+}
+
+OWID2010s <- OWID %>%
+  filter(Year >= 2010, !is.na(Code), Entity != "World") %>%
+  dplyr::rename(
+    child_mor = `Observation value - Indicator: Under-five mortality rate - Sex: Total - Wealth quintile: Total - Unit of measure: Deaths per 100 live births`,
+    health_exp = `Current health expenditure per capita, PPP (current international $)`,
+    pop = `Population (historical)`) %>%
+  mutate(
+    pop_norm = scales::rescale(pop, to = c(5,100)),
+    pop_chr = map_chr(pop, format_population),
+    child_mor_100 = child_mor/100
+  ) %>%
+  select(-Continent) %>%
+  left_join(Continent_Lookup_DF, by = "Code")
+
+OWID2019 <- OWID %>%
+  dplyr::rename(
+    child_mor = `Observation value - Indicator: Under-five mortality rate - Sex: Total - Wealth quintile: Total - Unit of measure: Deaths per 100 live births`,
+    health_exp = `Current health expenditure per capita, PPP (current international $)`,
+    pop = `Population (historical)`) %>%
+  filter(Year == 2019, !is.na(Code), pop < 1500000000) %>%
+  mutate(
+    pop_norm = scales::rescale(pop, to = c(5,100)),
+    pop_chr = map_chr(pop, format_population),
+    child_mor_100 = child_mor/100
+  ) %>%
+  select(-Continent) %>%
+  left_join(Continent_Lookup_DF, by = "Code")
+
+```
+
+```{r}
+#| label: fig-task1
+
+plot_ly(
+  data = OWID2019,
+  type = "scatter",
+  mode = "markers",
+  marker = list(size = ~pop_norm),
+  text = ~Entity,
+  hovertemplate = paste(
+    "<b>%{text}</b><br>2019<br>",
+    "<span style='font-size: 12px;'>", OWID_Var_Desc[5],":</span><br>",
+    "<span style='font-size: 16px;'><b>%{x:$,.0f}</b></span><br>",
+    "<span style='font-size: 12px;'>", OWID_Var_Desc[4],":</span><br>",
+    "<span style='font-size: 16px;'><b>%{y:.0%}</b></span><br>"
+  ),
+  y = ~child_mor_100, 
+  x = ~health_exp,
+  color = ~Continent
+) %>%
+  plotly::layout(
+    title = list(
+      text = "Child mortality vs. health expenditure, 2019<br><span style='font-size:16px;color:gray'>Healthcare expenditure per capita is measured in current international-$, which adjusts for price differences between countries. Under-five mortality is the share of newborns who die before reaching the age of five.</span>",
+      x = 0.1,  # Adjust title alignment (0.1 is left-aligned)
+      y = 0.9   # Positioning the title slightly down
+    ),
+    xaxis = list(
+      title = str_replace(OWID_Var_Desc[5], "\\(.*?\\)", ""),
+      type = "log",
+      tickformat = "$,.0f"
+    ),
+    yaxis = list(
+      title = str_replace(OWID_Var_Desc[4], "\\(.*?\\)", ""),
+      type = "log",
+      tickformat = ".1%",
+      tickvals = c(0.002, 0.005, 0.01, 0.02, 0.05, 0.1)
+    )
+  ) %>%
+  style(
+    hoverlabel = list(
+      bgcolor = "white"
+    )
+  )
+
+```
+
+Additionally, I tried plotting it as shown on the website, using `frame` to set the slider for the years. Unfortunately, I cannot get the size to properly display the population size. Also, using `hovertemplate`, I was unable to find a way to include additional data (in this case population size) not used in `plotly` aesthetics to show the population size (not my normalized proxy) in the popup. Only if you find time, maybe you can comment briefly on where to find good documentation for `plotly` in R.
+
+```{r}
+#| label: fig-task1-bonus
+#| eval: false
+
+plot_ly(
+  data = OWID2010s,
+  type = "scatter",
+  mode = "markers",
+  marker = list(size = ~pop_norm),
+  text = ~Entity,
+  hovertemplate = paste(
+    "<b>%{text}</b><br>2019<br>",
+    "<span style='font-size: 12px;  '>", OWID_Var_Desc[5],":</span><br>",
+    "<span style='font-size: 16px;'>%{x:$,.0f}</span><br>",
+    "<span style='font-size: 12px;  '>", OWID_Var_Desc[4],":</span><br>",
+    "<span style='font-size: 16px;'>%{y:.00%}</span><br>",
+    "<span style='font-size: 12px;  '>", OWID_Var_Desc[6],":</span><br>",
+    "<span style='font-size: 16px;'>%{marker.size:,}</span><br>"
+  ),
+  y = ~child_mor_100, 
+  x = ~health_exp,
+  color = ~Continent,
+  frame = ~Year
+) %>%
+  layout(
+    title = "Not finished",
+    xaxis = list(
+      title = str_replace(OWID_Var_Desc[5], "\\(.*?\\)", ""),
+      type = "log",
+      tickformat = "$,.0f"
+    ),
+    yaxis = list(
+      title = str_replace(OWID_Var_Desc[4], "\\(.*?\\)", ""),
+      type = "log",
+      tickformat = ".0%"
+    )
+  ) %>%
+  style(
+    hoverlabel = list(
+      bgcolor = "white"
+    )
+  )
+```
+
+<br>
+
+------------------------------------------------------------------------
+
+### Task 2 - IMDb small multiples
+
+The file [`imdb_series_df.csv` (Dropbox link)](https://www.dropbox.com/scl/fi/llqz7l4cd8csclx8hyuds/imdb_series_df.csv.zip?rlkey=atkn330zyluai9yksgf66wmiq&dl=0) contains a data set on rating information on series and episodes from the InternetMovieDatabase. Use these data to create a small multiples plot that illustrates a relationship of your choice. You can work with the entire dataset or a subset. Your plot should adhere to the principles of good design. In addition to the visualization, provide a sound discussion (10 sentences or less) of what the plot might tell us.
+
+*Note:* The data binary is fairly large (\~93MB). It makes sense to download it first to your local drive and then import it into R. However, make sure that the file is not synced to GitHub using `.gitignore`.
+
+```{r}
+#| label: fig-task2
+
+imdb <- read_csv("data/imdb_series_df.csv")
+
+imdb_comedy_longrunners <- imdb %>%
+  group_by(series_title) %>%
+  filter(any(season_nr == 7), !any(season_nr == 15)) %>%
+  filter(any(genres == "Comedy")) %>%
+  .$series_title %>%
+  unique()
+
+selected_comedies <- imdb_comedy_longrunners %>%
+  sample(20) %>%
+  c("Seinfeld")
+
+imdb_subset <- imdb %>%
+  filter(series_title %in% selected_comedies) %>%
+  filter(!is.na(avg_rating)) %>%
+  group_by(series_title) %>%
+  filter(n() > 50) %>%
+  group_by(series_title, season_nr) %>%
+  filter(n() > 10)
+
+imdb_subset %>%
+  arrange(series_title, season_nr, episode_nr) %>%
+  group_by(series_title) %>%
+  mutate(index_nr = row_number()) %>%
+  mutate(series_title = if_else(series_title == "Seinfeld",  "<span style='color:red; bg-color:yellow; font-weight:bold;'>Seinfeld</span>", series_title)) %>%
+  ggplot() +
+  geom_point(
+    aes(
+      x = index_nr,
+      y = avg_rating,
+      color = factor(season_nr),
+      group = season_nr
+    ),
+    size = 0.3,
+    alpha = 0.3
+  ) +
+  geom_smooth(
+    aes(
+      x = index_nr,
+      y = avg_rating,
+      color = factor(season_nr),
+      group = factor(season_nr)
+    ),
+    method = "lm",
+    se = FALSE
+  ) +
+  facet_wrap(~series_title, scales = "free") +
+  labs(
+    color = "Season",
+    x = "Episode (indexed across seasons)",
+    y = "Average rating with linear lines per season",
+    title = "A few randomly picked series compared to **<span style='color:red; background-color:yellow;'>Seinfeld</span>**"
+  ) +
+  theme_bw() +
+  theme(
+    plot.title = element_markdown(),
+    plot.subtitle = element_markdown(),
+    strip.text = element_markdown()
+  )
+
+```
+
+<br>
+
+::: {.answer style="background-color:purple; border-radius: 5px; padding: 20px;"}
+[The code picks random series that are of genre comedy, at least 7 seasons and 50 episodes long and compares their average rating across seasons to (subjectively) one of the best comedy series ever, Seinfeld.]{style="color:white"}
+
+[We can see that Seinfeld fans did really not like the ending, which may lead us to believe that they were frustrated with the ending of this classic, or in reverse causality, they got really unhappy with the quality and therefore the series ended. The latter is more likely.]{style="color:white"}
+
+[Compared to other longrunners we can see that especially in the last season, ratings steeply decline towards the last episodes. Overall however, viewers were not much less amused by the last season compared to previous seasons. Some series got overall better towards the later seasons, while some stayed the same, while others were slightly less funny.]{style="color:white"}
+
+[So, to conclude: The only clear effect we see is that the last episodes of the last season tend to be rated badly compared to first episodes in the last season. (The exception proves the rule.)]{style="color:white"}
+:::
+
+------------------------------------------------------------------------
+
+### Task 3 - Principles of good data visualization
+
+On [slide 75 of the lecture slides ("Dos and "Don'ts")](https://raw.githack.com/intro-to-data-science-24/lectures/main/09-visualization/09-visualization.html#85) you find a linked list of 20 statements expressing principles of good data visualization. Follow the links to learn more about them. Then, come up with another principle of good data visualization **that is not listed on the slide** and illustrate it following the instructions below:
+
+(i) Create a two-panel plot. The left panel shows a poorly designed plot (e.g., a 3D plot), the right panel shows a well-designed alternative using the same data. You are free to use whatever data you want to make your point.
+(ii) The title of the plot should be the name of the principle, e.g. "**Don't go 3D.**"
+(iii) A note embedded in the bottom of the plot should explain, in a few sentences, the principle illustrated in the plot and how the right is an improved over the left version.
+(iv) Embed the plot in your `.Rmd` but also provide it as a `.png` in your submission repo.
+
+#### Principle 21. Combine different forms of visualization to maximize effective knowledge transfer
+
+::: {.answer style="background-color:purple; border-radius: 5px; padding: 20px;"}
+##### [PACT Peacekeeping Activity Data Set]{style="color: white"}
+
+[Little explanation on the data, you can find more [here](https://www.uu.se/en/department/peace-and-conflict-research/research/research-data/the-peacekeeping-activity-pact-dataset-2.0).]{style="color: white"}
+
+-   [UN Peacekeeping Missions (UNPKOs)]{style="color: white"}
+
+-   [Based on hand-coded paragraphs from Mission Reports to the Secretary-General]{style="color: white"}
+
+-   [39 different Activity categories, with 6 different types of Engagement and binary variable coding the involvement of another International Actor (IA).]{style="color: white"}
+
+[For this data, a key insight is to compare missions and different subsets of missions across time. At what phase of the mission do certain peacekeeping activities drop? Is there a sequence of implementation?]{style="color: white"}
+
+[Key problem: Missions have different lengths. Therefore, towards the end, lesser missions are used to calculate the share of implemented peacekeeping activities. Some trends may be due to very active missions (e.g. the Mali mission with Operations tasks) deceasing.]{style="color: red"}
+
+[To plot this secondary information, we show a barplot with the number of active missions in each mission month to **not** foster wrong or rash conclusions. This can help in selecting mission groups of equal length, or deciding until which mission month, conclusions seem feasible. ]{style="color: white"}
+:::
+
+```{r}
+#| label: pact-prep
+#| code-fold: true
+#| code-summary: "Open here for boring data preparation."
+
+pact <- read_csv("data/PACT2_mission-month.csv") %>%
+  arrange(year, month) %>%
+  group_by(PKO) %>% 
+  mutate(month_index = row_number(PKO)) %>%
+  select(-contains("PeaceProcess"), -contains("Ceasefire"), -contains("National_Reconciliation"))
+
+# setting peacebuilding (PB) categories for aggregation
+
+class_sec <- c(
+  "Operations_PatrolsInterventions",
+  "ControlSALW",
+  "DisarmamentDemobilization",
+  "Reintegration",
+  "Demilitarization",
+  "ArmsEmbargo",
+  "BorderControl"
+)
+poc <- c("CivilianProtection")
+offensive <- c("Operations_UseOfForce")
+inst_pb <- c(
+  "PoliceReform",
+  "MilitaryReform",
+  "JusticeSectorReform",
+  "PrisonReform",
+  "Demining",
+  "DemocraticInstitutions",
+  "ElectionAssistance",
+  "ElectoralSecurity",
+  "VoterEducation",
+  "PartyAssistance",
+  "CivilSocietyAssistance",
+  "Media",
+  "HumanitarianRelief",
+  "LegalReform",
+  "PowerSharing"
+)
+people_pb <- c(
+  "TransitionalJustice",
+  "LocalReconciliation",
+  "PublicHealth",
+  "RefugeeAssistance"
+)
+state_pb <- c(
+  "Resources",
+  "StateAuthority",
+  "StateAdministration",
+  "EconomicDevelopment"
+)
+rights_rel <- c(
+  "HumanRights",
+  "ChildRights",
+  "SexualViolence",
+  "Gender"
+)
+
+# create some helper objects regarding the mission month for calculation
+
+active_missions_index <- table(pact$month_index)
+
+months <- as.data.frame(as.matrix(active_missions_index)) %>%
+  rownames_to_column(var = "month")
+
+# finally aggregating data for plot
+
+pact_nc_share <- pact %>%
+  group_by(month_index) %>%
+  select(month_index, contains("__All")) %>%
+  pivot_longer(cols = !month_index,
+               names_to = "Activity",
+               values_to = "number") %>%
+  mutate(
+    Activity = str_remove(Activity, "__All"),
+    Activity = case_when(
+      Activity %in% class_sec ~ "Classical security",
+      Activity %in% poc ~ "Protection of civilians",
+      Activity %in% offensive ~ "Offensive use of force",
+      Activity %in% inst_pb ~ "Institutional PB",
+      Activity %in% people_pb ~ "People-centered PB",
+      Activity %in% state_pb ~ "State-centered PB",
+      Activity %in% rights_rel ~ "Rights-based",
+      TRUE ~ Activity
+    ),
+    Activity = factor(
+      Activity,
+      levels = c(
+        "Rights-based",
+        "Institutional PB",
+        "People-centered PB",
+        "State-centered PB",
+        "Offensive use of force",
+        "Protection of civilians",
+        "Classical security"
+      )
+    )
+  ) %>%
+  group_by(month_index, Activity) %>%
+  summarise(number = sum(number, na.rm = TRUE), .groups = "drop") %>%
+  arrange(Activity) %>%
+  mutate(
+    perc = number / c(
+      active_missions_index * length(rights_rel),
+      active_missions_index * length(inst_pb),
+      active_missions_index * length(people_pb),
+      active_missions_index * length(state_pb),
+      active_missions_index * length(offensive),
+      active_missions_index * length(poc),
+      active_missions_index * length(class_sec)
+    )
+  )
+
+```
+
+```{r}
+#| label: fig-principle-21
+
+principle21_1 <- ggplot() +
+  geom_smooth(
+    aes(
+      x = month_index,
+      y = perc,
+      group = Activity,
+      colour = Activity,
+      linetype = Activity
+    ),
+    data = pact_nc_share,
+    se = FALSE
+  ) +
+  ylab("Share of implemented activities\nwithin each category") +
+  xlab("Months since mission start") +
+  scale_linetype_manual(values = c(
+    "solid",
+    "solid",
+    "twodash",
+    "dotted",
+    "solid",
+    "twodash",
+    "dotted"
+  )) +
+  scale_color_manual(values = c("green", "black", "black", "black", "blue", "blue", "blue")) +
+  scale_y_continuous(
+    limits = c(0,0.75)
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none"
+  )
+
+normalizer <- max(months$V1) / max(pact_nc_share$perc) # needed to hack a second axis
+# I do believe in second axes, GGPLOT DEVELOPERS YOU CANT DO NOTHING ABOUT IT!
+# DEPRECATE ALL YOU WANT I WILL PERSIST WITH BEAUTIFUL PLOTS!
+
+principle21_2 <- ggplot() +
+  geom_smooth(
+    aes(
+      x = month_index,
+      y = perc,
+      group = Activity,
+      colour = Activity,
+      linetype = Activity
+    ),
+    data = pact_nc_share,
+    se = FALSE
+  ) +
+  ylab("Share of implemented activities\nwithin each category") +
+  xlab("Months since mission start") +
+  scale_linetype_manual(values = c(
+    "solid",
+    "solid",
+    "twodash",
+    "dotted",
+    "solid",
+    "twodash",
+    "dotted"
+  )) +
+  scale_color_manual(values = c("green", "black", "black", "black", "blue", "blue", "blue")) +
+  geom_bar(
+    aes(
+      x = as.numeric(month),
+      y = V1 / normalizer,
+      alpha = 0.3
+    ),
+    width = 0.3,
+    alpha = 0.5,
+    stat = "identity",
+    data = months,
+    show.legend = FALSE
+  ) +
+  scale_y_continuous(
+    sec.axis = sec_axis(trans = ~ . * normalizer,
+                        name = "Number of active missions"),
+    limits = c(0,0.75)
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "none"
+  )
+
+grid.arrange(
+  textGrob("Combine different forms of visualization\nfor effective knowledge transfer.", gp = gpar(fontsize = 16, fontface = "bold")),
+  arrangeGrob(principle21_1, principle21_2, ncol = 2),
+  textGrob("Sometimes, only using one type of visualization may lead to rash conclusions. Multiple plots\nare a solution, but do not reinforce the connectedness of the data.\nEspecially in timelines, using multiple forms of visualization in the same plot\ncan lead to more effective knowledge transfer.", gp = gpar(fontsize = 12, col = "darkgray")),
+  ncol = 1,
+  heights = c(0.2, 1, 0.3)
+)
+
+```
+
+#### Modified Principle 16. Avoid multiple Y axis [for the same kind of data]{style="color:red"} at all cost
+
+How about we make it really clear to anyone not to draw direct conclusions. By literally comparing apples and bananas. I only included this principle because it is implied by my actual principle above. If we use different visualization types, levels of opaqueness, etc. we can nudge readers (even with a secondary axis) not to draw wrong conclusions from the data.
+
+Becuase this is a bonus, I did neither finish it nor put it in the required form. Please only grade the one above. I planned to plot index of US GDP and literally symbols of apples and bananas with labels stating the consumption in tonnes per capita for different years. This would not even have required a second axis, so readers should really not have taken wrong conclusions.
+
+```{r}
+#| label: owid-prep
+#| code-fold: true
+#| code-summary: "Open here for boring data preparation."
+
+bananas <- read_csv("data/bananas-used-for-direct-human-food-per-capita.csv") %>%
+  select(Year, `Food per capita (kg)`) %>%
+  mutate(Entity = "United States") %>%
+  rename(`Bananas per capita (kg)` = `Food per capita (kg)`)
+apples <- read_csv("data/apples-used-for-direct-human-food-per-capita.csv") %>%
+  select(Year, `Food per capita (kg)`) %>%
+  mutate(Entity = "United States") %>%
+  rename(`Apples per capita (kg)` = `Food per capita (kg)`)
+gdp <- read_csv("data/gdp-per-capita-worldbank.csv") %>%
+  select(Entity, Year, "GDP per capita, PPP (constant 2017 international $)")
+
+full_bananas <- gdp %>%
+  left_join(bananas, by = c("Entity", "Year")) %>%
+  left_join(apples, by = c("Entity", "Year")) %>%
+  filter(Year >= 2000) %>%
+  group_by(Entity) %>%
+  mutate(
+    gdp = `GDP per capita, PPP (constant 2017 international $)`,
+    base_value = first(gdp),
+    gdp_index = (gdp / base_value) * 100
+  ) %>%
+  ungroup() %>%
+  select(-base_value)
+
+y_axis_label <- names(gdp)[3] %>% str_c(", indexed")
+```
+
+```{r}
+#| label: principle-17-mod
+
+ggplot(data = full_bananas) +
+  geom_line(
+    aes(
+      x = Year,
+      y = gdp_index,
+      group = Entity,
+      alpha = Entity
+    )
+  ) +
+  geom_hline(yintercept = 100, color = "blue", linetype = "dashed") +
+  theme_bw() +
+  theme(
+    panel.grid.major.y = element_blank(),  # Add grid line at y = 100
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank()
+  ) +
+  labs(
+    x = "",
+    y = y_axis_label
+  )
+  
+  
+
+```
+
+#### Bonus Principle. In the natural world, bars usually do not float
+
+Except for maybe the [Restaurant at the End of the Universe](https://hitchhikers.fandom.com/wiki/Milliways "For Pan Galactic Gargle Blasters, this way!"), if you consider this a bar. Or if floating through space on an [ice planet](https://www.starwars.com/databank/mos-eisley-cantina "The Mos Isley Cantina, maybe a floating bar.") is considered floating.
+
+```{r}
+#| label: bonus-principle
+
+bonus_principle1 <- ggplot(data = mtcars) +
+  geom_col(
+    aes(
+      x = factor(cyl),
+      y = mean(hp)
+    )
+  ) +
+  scale_y_continuous(limits = c(0,3000)) +
+  labs(
+    x = "Number of cylinders",
+    y = "Average horsepowers"
+  ) +
+  theme_bw()
+
+bonus_principle2 <- ggplot(data = mtcars) +
+  geom_col(
+    aes(
+      x = factor(cyl),
+      y = mean(hp)
+    )
+  ) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,3000)) +
+  labs(
+    x = "Number of cylinders",
+    y = "Average horsepowers"
+  ) +
+  theme_bw()
+
+grid.arrange(
+  textGrob("Bars do not float.", gp = gpar(fontsize = 20, fontface = "bold")),
+  arrangeGrob(bonus_principle1, bonus_principle2, ncol = 2),
+  textGrob("In the wild, bars usually do not float. We can use the expand\nparameter from the ggplot axis verbals to put them on the ground.", gp = gpar(fontsize = 14, col = "darkgray")),
+  ncol = 1,
+  heights = c(0.1, 1, 0.2)
+)
+
+```
